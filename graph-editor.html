@@ -84,7 +84,7 @@
       <input
         type="text"
         id="fileNameInput"
-        placeholder="ConceptMap.txt"
+        placeholder="graph.txt"
         aria-label="File name"
       />
       <input type="file" id="fileInput" accept=".txt,.text" />
@@ -144,7 +144,6 @@ Yeast affects Flavor : depending on strain`;
       if (!name) {
         name = 'graph.txt';
       } else if (!name.includes('.')) {
-        // if user didn't add extension, make it .txt
         name = name + '.txt';
       }
       downloadTextFile(name, content); // [web:60][web:69]
@@ -161,7 +160,6 @@ Yeast affects Flavor : depending on strain`;
         const contents = e.target.result;
         textarea.value = contents;
         drawGraphFromText(textarea.value);
-        // Prefill filename input with uploaded name
         fileNameInput.value = file.name;
       };
       reader.readAsText(file);
@@ -171,7 +169,7 @@ Yeast affects Flavor : depending on strain`;
     // ---------- Parsing ----------
 
     function parseGraph(text) {
-      const nodes = new Map(); // name -> { name }
+      const nodes = new Map(); // name -> { name, x, y, vx, vy }
       const edges = [];
 
       const lines = text.split('\n');
@@ -179,11 +177,9 @@ Yeast affects Flavor : depending on strain`;
         const line = rawLine.trim();
         if (!line) continue;
 
-        // Split on ":" for edge text (optional)
         const [leftPart, edgeTextPart] = line.split(':').map(s => s && s.trim());
         const edgeText = edgeTextPart || '';
 
-        // Try syntax with "->" first
         let src, rel, tgt;
 
         if (leftPart.includes('->')) {
@@ -193,9 +189,8 @@ Yeast affects Flavor : depending on strain`;
           tgt = parts.shift();
           rel = parts.join(' ').trim() || '';
         } else {
-          // Fallback: source RELATION target (at least 3 tokens)
           const tokens = leftPart.split(/\s+/);
-          if (tokens.length < 3) continue; // invalid line
+          if (tokens.length < 3) continue;
           src = tokens[0];
           tgt = tokens[tokens.length - 1];
           rel = tokens.slice(1, tokens.length - 1).join(' ');
@@ -217,19 +212,105 @@ Yeast affects Flavor : depending on strain`;
       return { nodes: Array.from(nodes.values()), edges };
     }
 
-    // ---------- Layout ----------
+    // ---------- Simple force-directed layout ----------
 
-    function layoutNodes(nodes, width, height) {
+    function layoutNodesForce(nodes, edges, width, height) {
+      if (!nodes.length) return;
+
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      // Initialize positions (if missing) on a circle
       const n = nodes.length;
-      const radius = Math.min(width, height) * 0.35;
-      const cx = width / 2;
-      const cy = height / 2;
-
+      const initRadius = Math.min(width, height) * 0.3;
       nodes.forEach((node, i) => {
-        const angle = (2 * Math.PI * i) / n;
-        node.x = cx + radius * Math.cos(angle);
-        node.y = cy + radius * Math.sin(angle);
+        if (node.x == null || node.y == null) {
+          const angle = (2 * Math.PI * i) / n;
+          node.x = centerX + initRadius * Math.cos(angle);
+          node.y = centerY + initRadius * Math.sin(angle);
+        }
+        node.vx = node.vx || 0;
+        node.vy = node.vy || 0;
       });
+
+      const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]));
+
+      const iterations = 80;           // small but enough for static layout
+      const repulsion = 4000;          // node-node repulsion strength
+      const springLength = 120;        // ideal edge length
+      const springK = 0.01;            // edge spring strength
+      const centerPull = 0.005;        // how strongly nodes are pulled to center
+      const damping = 0.85;            // velocity damping
+
+      for (let iter = 0; iter < iterations; iter++) {
+        // Reset forces
+        nodes.forEach(node => {
+          node.fx = 0;
+          node.fy = 0;
+        });
+
+        // Node-node repulsion
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i];
+            const b = nodes[j];
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let dist2 = dx * dx + dy * dy;
+            if (dist2 === 0) {
+              dx = (Math.random() - 0.5) * 0.1;
+              dy = (Math.random() - 0.5) * 0.1;
+              dist2 = dx * dx + dy * dy;
+            }
+            const dist = Math.sqrt(dist2);
+            const force = repulsion / dist2;
+            const fx = (force * dx) / dist;
+            const fy = (force * dy) / dist;
+
+            a.fx -= fx;
+            a.fy -= fy;
+            b.fx += fx;
+            b.fy += fy;
+          }
+        }
+
+        // Edge springs
+        edges.forEach(e => {
+          const a = nodes[nodeIndex.get(e.source)];
+          const b = nodes[nodeIndex.get(e.target)];
+          if (!a || !b) return;
+
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+          const delta = dist - springLength;
+          const force = springK * delta;
+          const fx = (force * dx) / dist;
+          const fy = (force * dy) / dist;
+
+          a.fx += fx;
+          a.fy += fy;
+          b.fx -= fx;
+          b.fy -= fy;
+        });
+
+        // Centering force
+        nodes.forEach(node => {
+          const dx = centerX - node.x;
+          const dy = centerY - node.y;
+          node.fx += centerPull * dx;
+          node.fy += centerPull * dy;
+        });
+
+        // Integrate velocities and positions
+        nodes.forEach(node => {
+          node.vx = (node.vx + node.fx) * damping;
+          node.vy = (node.vy + node.fy) * damping;
+
+          node.x += node.vx;
+          node.y += node.vy;
+        });
+      }
     }
 
     // ---------- Drawing (auto-sized boxes) ----------
@@ -240,10 +321,10 @@ Yeast affects Flavor : depending on strain`;
       const h = canvas.height;
 
       ctx.clearRect(0, 0, w, h);
-
       if (!nodes.length) return;
 
-      layoutNodes(nodes, w, h);
+      // Use the force layout instead of simple circle
+      layoutNodesForce(nodes, edges, w, h);
 
       const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]));
 
@@ -258,13 +339,11 @@ Yeast affects Flavor : depending on strain`;
         const t = nodes[nodeIndex.get(e.target)];
         if (!s || !t) continue;
 
-        // Line
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.lineTo(t.x, t.y);
         ctx.stroke();
 
-        // Edge label (relation + edgeText)
         const label = [e.relation, e.text].filter(Boolean).join(' | ');
         if (label) {
           const mx = (s.x + t.x) / 2;
@@ -289,7 +368,7 @@ Yeast affects Flavor : depending on strain`;
         const paddingY = 6;
 
         const textWidth = ctx.measureText(label).width;
-        const textHeight = 12; // approximate font size in px
+        const textHeight = 12;
 
         const boxWidth = textWidth + 2 * paddingX;
         const boxHeight = textHeight + 2 * paddingY;
@@ -297,7 +376,6 @@ Yeast affects Flavor : depending on strain`;
         const x = node.x - boxWidth / 2;
         const y = node.y - boxHeight / 2;
 
-        // Box
         ctx.beginPath();
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#0074D9';
@@ -306,7 +384,6 @@ Yeast affects Flavor : depending on strain`;
         ctx.fill();
         ctx.stroke();
 
-        // Text
         ctx.fillStyle = '#000000';
         const textX = node.x - textWidth / 2;
         const textY = node.y + textHeight / 2 - 2;
