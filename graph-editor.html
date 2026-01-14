@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Text → Graph Demo</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      height: 100vh;
+      display: flex;
+    }
+
+    /* Left: text input */
+    #editor {
+      width: 40%;
+      padding: 10px;
+      box-sizing: border-box;
+      border-right: 1px solid #ccc;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #editor textarea {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+    #header {
+      font-size: 14px;
+    }
+
+    #controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
+    #controls button {
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #fileNameInput {
+      width: 140px;
+      padding: 3px 5px;
+      font-size: 13px;
+    }
+
+    /* Right: canvas */
+    #viewer {
+      flex: 1;
+      position: relative;
+    }
+
+    #graphCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <div id="editor">
+    <div id="header">
+      Type one edge per line, e.g.:<br>
+      <code>Beer -> Yeast : is fermented by</code><br>
+      <code>Beer causes Hangover : after a party</code><br>
+      or<br>
+      <code>Beer causes Hangover : after a party</code> (space-RELATION-space)
+    </div>
+
+    <!-- Save / Load controls -->
+    <div id="controls">
+      <button id="saveBtn">Save</button>
+      <input
+        type="text"
+        id="fileNameInput"
+        placeholder="ConceptMap.txt"
+        aria-label="File name"
+      />
+      <input type="file" id="fileInput" accept=".txt,.text" />
+      <span>(upload a text file to load it)</span>
+    </div>
+
+    <textarea id="graphText" spellcheck="false"></textarea>
+  </div>
+
+  <div id="viewer">
+    <canvas id="graphCanvas"></canvas>
+  </div>
+
+  <script>
+    const textarea = document.getElementById('graphText');
+    const canvas = document.getElementById('graphCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const saveBtn = document.getElementById('saveBtn');
+    const fileInput = document.getElementById('fileInput');
+    const fileNameInput = document.getElementById('fileNameInput');
+
+    function resizeCanvas() {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+      drawGraphFromText(textarea.value);
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+
+    textarea.value =
+`Beer -> Yeast : is fermented by
+Beer causes Hangover : after a party
+Yeast affects Flavor : depending on strain`;
+
+    textarea.addEventListener('input', () => {
+      drawGraphFromText(textarea.value);
+    });
+
+    // ---------- Save text to file ----------
+
+    function downloadTextFile(filename, text) {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' }); // [web:69]
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    saveBtn.addEventListener('click', () => {
+      const content = textarea.value;
+      let name = fileNameInput.value.trim();
+      if (!name) {
+        name = 'graph.txt';
+      } else if (!name.includes('.')) {
+        // if user didn't add extension, make it .txt
+        name = name + '.txt';
+      }
+      downloadTextFile(name, content); // [web:60][web:69]
+    });
+
+    // ---------- Load text file into textarea ----------
+
+    fileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader(); // [web:68][web:71]
+      reader.onload = (e) => {
+        const contents = e.target.result;
+        textarea.value = contents;
+        drawGraphFromText(textarea.value);
+        // Prefill filename input with uploaded name
+        fileNameInput.value = file.name;
+      };
+      reader.readAsText(file);
+      fileInput.value = '';
+    });
+
+    // ---------- Parsing ----------
+
+    function parseGraph(text) {
+      const nodes = new Map(); // name -> { name }
+      const edges = [];
+
+      const lines = text.split('\n');
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        // Split on ":" for edge text (optional)
+        const [leftPart, edgeTextPart] = line.split(':').map(s => s && s.trim());
+        const edgeText = edgeTextPart || '';
+
+        // Try syntax with "->" first
+        let src, rel, tgt;
+
+        if (leftPart.includes('->')) {
+          const [leftSrc, leftRest] = leftPart.split('->');
+          src = leftSrc.trim();
+          const parts = leftRest.trim().split(/\s+/);
+          tgt = parts.shift();
+          rel = parts.join(' ').trim() || '';
+        } else {
+          // Fallback: source RELATION target (at least 3 tokens)
+          const tokens = leftPart.split(/\s+/);
+          if (tokens.length < 3) continue; // invalid line
+          src = tokens[0];
+          tgt = tokens[tokens.length - 1];
+          rel = tokens.slice(1, tokens.length - 1).join(' ');
+        }
+
+        if (!src || !tgt) continue;
+
+        if (!nodes.has(src)) nodes.set(src, { name: src });
+        if (!nodes.has(tgt)) nodes.set(tgt, { name: tgt });
+
+        edges.push({
+          source: src,
+          target: tgt,
+          relation: rel,
+          text: edgeText
+        });
+      }
+
+      return { nodes: Array.from(nodes.values()), edges };
+    }
+
+    // ---------- Layout ----------
+
+    function layoutNodes(nodes, width, height) {
+      const n = nodes.length;
+      const radius = Math.min(width, height) * 0.35;
+      const cx = width / 2;
+      const cy = height / 2;
+
+      nodes.forEach((node, i) => {
+        const angle = (2 * Math.PI * i) / n;
+        node.x = cx + radius * Math.cos(angle);
+        node.y = cy + radius * Math.sin(angle);
+      });
+    }
+
+    // ---------- Drawing (auto-sized boxes) ----------
+
+    function drawGraphFromText(text) {
+      const { nodes, edges } = parseGraph(text);
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      if (!nodes.length) return;
+
+      layoutNodes(nodes, w, h);
+
+      const nodeIndex = new Map(nodes.map((n, i) => [n.name, i]));
+
+      // Draw edges
+      ctx.strokeStyle = '#555';
+      ctx.fillStyle = '#000';
+      ctx.lineWidth = 1.5;
+      ctx.font = '12px sans-serif';
+
+      for (const e of edges) {
+        const s = nodes[nodeIndex.get(e.source)];
+        const t = nodes[nodeIndex.get(e.target)];
+        if (!s || !t) continue;
+
+        // Line
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.stroke();
+
+        // Edge label (relation + edgeText)
+        const label = [e.relation, e.text].filter(Boolean).join(' | ');
+        if (label) {
+          const mx = (s.x + t.x) / 2;
+          const my = (s.y + t.y) / 2;
+          ctx.save();
+          ctx.fillStyle = 'rgba(255,255,255,0.8)';
+          const padding = 4;
+          const textWidth = ctx.measureText(label).width;
+          ctx.fillRect(mx - textWidth / 2 - padding, my - 10, textWidth + 2 * padding, 16);
+          ctx.fillStyle = '#333';
+          ctx.fillText(label, mx - textWidth / 2, my + 2);
+          ctx.restore();
+        }
+      }
+
+      // Draw nodes with auto-sized boxes
+      for (const node of nodes) {
+        const label = node.name;
+        ctx.font = '12px sans-serif';
+
+        const paddingX = 10;
+        const paddingY = 6;
+
+        const textWidth = ctx.measureText(label).width;
+        const textHeight = 12; // approximate font size in px
+
+        const boxWidth = textWidth + 2 * paddingX;
+        const boxHeight = textHeight + 2 * paddingY;
+
+        const x = node.x - boxWidth / 2;
+        const y = node.y - boxHeight / 2;
+
+        // Box
+        ctx.beginPath();
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#0074D9';
+        ctx.lineWidth = 2;
+        ctx.rect(x, y, boxWidth, boxHeight);
+        ctx.fill();
+        ctx.stroke();
+
+        // Text
+        ctx.fillStyle = '#000000';
+        const textX = node.x - textWidth / 2;
+        const textY = node.y + textHeight / 2 - 2;
+        ctx.fillText(label, textX, textY);
+      }
+    }
+
+    // Initial sizing and draw
+    resizeCanvas();
+  </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+Building -> HotWater : uses
+Building property surface: has
+Building property age: has
+Building property geoLocalitation: has
+Building property address: has
+Building property type: has
+Building property inhabitants: contains
+Building computes hourlyPowerDemands:consumes
+
+Building -> Insulation: has
+Building -> CadastralParcel:containedIn
+
+Equipment -> HotWater : produces
+HotWater computes powerPerHour: needs
+BathTub-> Equipment: typeOf
+
+Heating -> Equipment: input
+Heating computes powerPerHour: consumes
+Fuel -> Heating:sourceType
+Gas-> Heating:sourceType
+HeatPump -> Heating:sourceType
+CollectiveHeating -> Heating:sourceType
+
+CadastralParcel -> Locality: belongsTo
+
+Non-Residential -> Building: typeOf
+
+Residential -> Building: typeOf
+House -> Residential:typeOf
+Apartment-> Residential:typeOf
