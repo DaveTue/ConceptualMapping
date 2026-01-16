@@ -1,0 +1,58 @@
+Building -> HotWater : uses
+Building property surface: has
+Building property age: has
+Building property geoLocalitation: has
+Building property address: has
+Building property type: has
+Building property inhabitants: contains
+Building computes hourlyPowerDemands:consumes
+
+Building -> Insulation: has
+Insulation property insulationLevel: has
+Building -> CadastralParcel:containedIn
+
+Equipment -> HotWater : produces
+HotWater computes powerPerHour: needs
+BathTub-> Equipment: typeOf
+
+Heating -> Equipment: input
+Heating computes powerPerHour: consumes
+Fuel -> Heating:sourceType
+Gas-> Heating:sourceType
+HeatPump -> Heating:sourceType
+CollectiveHeating -> Heating:sourceType
+
+CadastralParcel -> Locality: belongsTo
+
+Non-Residential -> Building: typeOf
+
+Residential -> Building: typeOf
+House -> Residential:typeOf
+Apartment-> Residential:typeOf
+
+
+def Building = A structure which requires heat to keep a confortable temperature.
+def HotWater = Water heated above ambient temperature for domestic or service uses.
+def surface = The total floor or envelope area associated with a building.
+def age = The time elapsed since the building was constructed or last fully renovated.
+def geoLocalitation = The geographic location of the building, typically expressed as coordinates.
+def address = The postal address identifying the building’s physical location.
+def type = The category of a building based on use or structural characteristics.
+def inhabitants = The people who occupy or regularly use the building.
+def hourlyPowerDemands = The amount of power required by the building in each hour.
+def Insulation = Material or systems that limit heat transfer through the building envelope.
+def insulationLevel = A measure of the effectiveness of insulation in reducing heat transfer.
+def CadastralParcel = A legally defined land unit used for ownership and tax records.
+def Equipment = Technical devices or systems installed to provide heat services to the building.
+def BathTub = A sanitary fixture used for bathing, typically connected to hot and cold water.
+def Heating = A system or process that supplies heat to indoor spaces in the building.
+def powerPerHour = The rate of energy use or production per hour.
+def Fuel = An energy carrier that can be burned or transformed to provide heat.
+def Gas = A gaseous fuel, such as natural gas or LPG, used for heating or hot water.
+def HeatPump = A device that transfers heat from a source to a sink using electrical energy.
+def CollectiveHeating = A heating system shared by multiple dwellings or units, often centrally managed.
+def Locality = A geographic area such as a neighborhood, town, or district where parcels and buildings are located.
+def Non-Residential = Buildings primarily used for commercial, industrial, institutional, or service activities.
+def Residential = Buildings primarily used for housing people.
+def House = A residential building, typically a single-family dwelling with its own entrance.
+def Apartment = A self-contained dwelling unit located within a larger residential building.
